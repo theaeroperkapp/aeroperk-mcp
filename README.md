@@ -63,9 +63,9 @@ ChatGPT → MCP Server (Vercel) → AeroPerk Backend (EC2)
 - [x] Test production endpoint
 
 ### Phase 8: ChatGPT Integration
-- [ ] Enable ChatGPT Developer Mode
-- [ ] Create ChatGPT App
-- [ ] Configure MCP Server URL
+- [x] Enable ChatGPT Developer Mode
+- [x] Create ChatGPT App
+- [x] Configure MCP Server URL
 - [ ] Test with sample prompts
 
 ---
@@ -77,6 +77,7 @@ ChatGPT → MCP Server (Vercel) → AeroPerk Backend (EC2)
 | **MCP Server** | https://aeroperk-mcp.vercel.app/api/mcp |
 | **Home Page** | https://aeroperk-mcp.vercel.app |
 | **Privacy Policy** | https://aeroperk-mcp.vercel.app/privacy-policy |
+| **GitHub Repo** | https://github.com/theaeroperkapp/aeroperk-mcp |
 | **Vercel Dashboard** | https://vercel.com/aeroperk/aeroperk-mcp |
 
 ---
