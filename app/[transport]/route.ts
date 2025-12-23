@@ -238,6 +238,7 @@ const handler = createMcpHandler(
   {
     basePath: '/',
     verboseLogs: true,
+    disableSse: true,
   }
 );
 
