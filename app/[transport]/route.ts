@@ -1,246 +1,184 @@
-import { createMcpHandler } from '@vercel/mcp-adapter';
-import { z } from 'zod';
+import { NextRequest, NextResponse } from 'next/server';
 import { aeroperkClient } from '@/lib/aeroperkClient';
 
-// Create the MCP handler with Streamable HTTP transport
-const handler = createMcpHandler(
-  async (server) => {
-    // Tool 1: Create Delivery Request
-    server.tool(
-      'create_delivery_request',
-      'Create a new package delivery request with pickup location, dropoff location, and reward amount. The request will be visible to drivers traveling on matching routes.',
-      {
-        title: z.string().min(1).max(100).describe('Brief title for the delivery (1-100 chars). Example: "Laptop delivery to Sao Paulo"'),
-        pickupAddress: z.string().describe('Pickup location - can be full address or "City, Country". Example: "Seattle, WA, USA"'),
-        dropoffAddress: z.string().describe('Dropoff location - can be full address or "City, Country". Example: "Sao Paulo, Brazil"'),
-        reward: z.number().min(1).max(10000).describe('Amount in USD willing to pay the driver (minimum $1, maximum $10,000)'),
-        shortDescription: z.string().max(500).optional().describe('Description of the item being delivered (optional, max 500 chars)'),
-        deadline: z.string().optional().describe('Delivery deadline in ISO 8601 format (optional). Example: "2025-12-28T00:00:00.000Z"'),
-      },
-      async ({ title, pickupAddress, dropoffAddress, reward, shortDescription, deadline }, extra) => {
-        try {
-          // Check for auth token
-          const authToken = extra.authInfo?.token;
-          if (!authToken) {
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: JSON.stringify({
-                    error: 'Authentication required',
-                    message: 'Please log in to AeroPerk to create delivery requests. You can sign up at https://aeroperk.com',
-                  }),
-                },
-              ],
-            };
-          }
+// Simple MCP Server implementation for ChatGPT
+const SERVER_INFO = {
+  name: 'aeroperk-mcp',
+  version: '1.0.0',
+};
 
-          aeroperkClient.setAuthToken(authToken);
-          const request = await aeroperkClient.createRequest({
-            title,
-            pickupAddress,
-            dropoffAddress,
-            reward,
-            shortDescription,
-            deadline,
-          });
-
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({
-                  success: true,
-                  message: `Delivery request "${title}" created successfully!`,
-                  request: {
-                    id: request._id,
-                    title: request.title,
-                    status: request.status,
-                    reward: request.reward,
-                    pickup: request.pickupAddress,
-                    dropoff: request.dropoffAddress,
-                  },
-                }),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({
-                  error: 'Failed to create request',
-                  message: error.response?.data?.message || error.message,
-                }),
-              },
-            ],
-            isError: true,
-          };
-        }
-      }
-    );
-
-    // Tool 2: Search Driver Routes
-    server.tool(
-      'search_driver_routes',
-      'Search for drivers traveling on a specific route who can deliver packages. Returns available drivers with their travel dates, capacity, and pricing.',
-      {
-        originCity: z.string().optional().describe('Origin city name (e.g., "Seattle", "New York", "London")'),
-        destinationCity: z.string().optional().describe('Destination city name (e.g., "Sao Paulo", "Tokyo", "Paris")'),
-        originCountry: z.string().optional().describe('Origin country (optional)'),
-        destinationCountry: z.string().optional().describe('Destination country (optional)'),
-        dateFrom: z.string().optional().describe('Start of travel date range (ISO date, e.g., "2025-12-20")'),
-        dateTo: z.string().optional().describe('End of travel date range (ISO date, e.g., "2025-12-31")'),
-        vehicleType: z.enum(['car', 'van', 'truck', 'suv', 'motorcycle', 'air', 'train', 'bus']).optional().describe('Filter by vehicle/transport type'),
-        maxPrice: z.number().min(0).optional().describe('Maximum price willing to pay'),
-        limit: z.number().min(1).max(50).optional().describe('Maximum number of results (1-50, default 10)'),
-      },
-      async (params) => {
-        try {
-          const result = await aeroperkClient.searchDriverRoutes({
-            ...params,
-            limit: params.limit || 10,
-          });
-
-          const routes = result.driverRoutes || result;
-
-          if (!routes || routes.length === 0) {
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: JSON.stringify({
-                    success: true,
-                    message: 'No drivers found for this route. Try different cities or dates.',
-                    results: [],
-                    total: 0,
-                  }),
-                },
-              ],
-            };
-          }
-
-          const formattedRoutes = routes.map((route: any) => ({
-            id: route._id,
-            origin: `${route.origin?.city || 'Unknown'}, ${route.origin?.country || ''}`,
-            destination: `${route.destination?.city || 'Unknown'}, ${route.destination?.country || ''}`,
-            departureDate: route.departureDate,
-            arrivalDate: route.arrivalDate,
-            vehicleType: route.vehicleType,
-            pricePerKg: route.pricePerKg,
-            availableCapacity: route.availableCapacity,
-            driver: route.user ? {
-              name: `${route.user.firstName || ''} ${route.user.lastName || ''}`.trim() || 'Anonymous',
-              rating: route.user.rating,
-            } : null,
-          }));
-
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({
-                  success: true,
-                  message: `Found ${formattedRoutes.length} driver(s) on this route`,
-                  results: formattedRoutes,
-                  total: result.pagination?.total || formattedRoutes.length,
-                }),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({
-                  error: 'Failed to search routes',
-                  message: error.response?.data?.message || error.message,
-                }),
-              },
-            ],
-            isError: true,
-          };
-        }
-      }
-    );
-
-    // Tool 3: Assign Driver
-    server.tool(
-      'assign_driver',
-      'As a driver, assign yourself to a delivery request. This tool is for DRIVERS to claim delivery jobs. Senders should use create_delivery_request instead.',
-      {
-        requestId: z.string().describe('The ID of the delivery request to assign yourself to (24-character MongoDB ObjectId)'),
-        note: z.string().max(1000).optional().describe('Optional message to the sender (max 1000 chars)'),
-      },
-      async ({ requestId, note }, extra) => {
-        try {
-          const authToken = extra.authInfo?.token;
-          if (!authToken) {
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: JSON.stringify({
-                    error: 'Authentication required',
-                    message: 'Please log in to AeroPerk to assign yourself as a driver. You can sign up at https://aeroperk.com',
-                  }),
-                },
-              ],
-            };
-          }
-
-          aeroperkClient.setAuthToken(authToken);
-          const result = await aeroperkClient.assignDriver(requestId, note);
-
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({
-                  success: true,
-                  message: 'You have been assigned to this delivery request!',
-                  assignment: {
-                    requestId,
-                    status: result.status || 'assigned',
-                  },
-                }),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({
-                  error: 'Failed to assign driver',
-                  message: error.response?.data?.message || error.message,
-                }),
-              },
-            ],
-            isError: true,
-          };
-        }
-      }
-    );
-  },
+const TOOLS = [
   {
-    serverInfo: {
-      name: 'aeroperk-mcp',
-      version: '1.0.0',
-    },
-    capabilities: {
-      tools: {},
+    name: 'create_delivery_request',
+    description: 'Create a new package delivery request with pickup location, dropoff location, and reward amount.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Brief title for the delivery (1-100 chars)' },
+        pickupAddress: { type: 'string', description: 'Pickup location - city or full address' },
+        dropoffAddress: { type: 'string', description: 'Dropoff location - city or full address' },
+        reward: { type: 'number', description: 'Amount in USD to pay the driver (1-10000)', minimum: 1, maximum: 10000 },
+        shortDescription: { type: 'string', description: 'Description of the item (optional)' },
+      },
+      required: ['title', 'pickupAddress', 'dropoffAddress', 'reward'],
     },
   },
   {
-    basePath: '/',
-    verboseLogs: true,
-    disableSse: true,
+    name: 'search_driver_routes',
+    description: 'Search for drivers traveling on a specific route who can deliver packages.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        originCity: { type: 'string', description: 'Origin city name' },
+        destinationCity: { type: 'string', description: 'Destination city name' },
+        dateFrom: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+        dateTo: { type: 'string', description: 'End date (YYYY-MM-DD)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'assign_driver',
+    description: 'As a driver, assign yourself to a delivery request.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'The ID of the delivery request' },
+        note: { type: 'string', description: 'Optional message to the sender' },
+      },
+      required: ['requestId'],
+    },
+  },
+];
+
+async function handleToolCall(name: string, args: any, authToken?: string) {
+  try {
+    if (authToken) {
+      aeroperkClient.setAuthToken(authToken);
+    }
+
+    switch (name) {
+      case 'create_delivery_request': {
+        if (!authToken) {
+          return { error: 'Authentication required. Please log in to AeroPerk at https://aeroperk.com' };
+        }
+        const request = await aeroperkClient.createRequest({
+          title: args.title,
+          pickupAddress: args.pickupAddress,
+          dropoffAddress: args.dropoffAddress,
+          reward: args.reward,
+          shortDescription: args.shortDescription,
+        });
+        return {
+          success: true,
+          message: `Delivery request "${args.title}" created!`,
+          requestId: request._id,
+        };
+      }
+
+      case 'search_driver_routes': {
+        const result = await aeroperkClient.searchDriverRoutes({
+          originCity: args.originCity,
+          destinationCity: args.destinationCity,
+          dateFrom: args.dateFrom,
+          dateTo: args.dateTo,
+          limit: 10,
+        });
+        const routes = result.driverRoutes || result || [];
+        return {
+          success: true,
+          count: routes.length,
+          routes: routes.map((r: any) => ({
+            id: r._id,
+            origin: `${r.origin?.city}, ${r.origin?.country}`,
+            destination: `${r.destination?.city}, ${r.destination?.country}`,
+            departureDate: r.departureDate,
+            pricePerKg: r.pricePerKg,
+          })),
+        };
+      }
+
+      case 'assign_driver': {
+        if (!authToken) {
+          return { error: 'Authentication required. Please log in to AeroPerk at https://aeroperk.com' };
+        }
+        await aeroperkClient.assignDriver(args.requestId, args.note);
+        return { success: true, message: 'You have been assigned to this delivery!' };
+      }
+
+      default:
+        return { error: `Unknown tool: ${name}` };
+    }
+  } catch (error: any) {
+    return { error: error.response?.data?.message || error.message };
   }
-);
+}
 
-export const GET = handler;
-export const POST = handler;
+function createJsonRpcResponse(id: any, result: any) {
+  return { jsonrpc: '2.0', id, result };
+}
+
+function createJsonRpcError(id: any, code: number, message: string) {
+  return { jsonrpc: '2.0', id, error: { code, message } };
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { method, params, id } = body;
+    const authHeader = request.headers.get('authorization');
+    const authToken = authHeader?.replace('Bearer ', '');
+
+    console.log('MCP Request:', { method, id, hasAuth: !!authToken });
+
+    switch (method) {
+      case 'initialize':
+        return NextResponse.json(createJsonRpcResponse(id, {
+          protocolVersion: '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: SERVER_INFO,
+        }));
+
+      case 'notifications/initialized':
+        return NextResponse.json(createJsonRpcResponse(id, {}));
+
+      case 'tools/list':
+        return NextResponse.json(createJsonRpcResponse(id, { tools: TOOLS }));
+
+      case 'tools/call': {
+        const { name, arguments: args } = params || {};
+        const result = await handleToolCall(name, args || {}, authToken);
+        return NextResponse.json(createJsonRpcResponse(id, {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        }));
+      }
+
+      default:
+        return NextResponse.json(createJsonRpcError(id, -32601, `Method not found: ${method}`));
+    }
+  } catch (error: any) {
+    console.error('MCP Error:', error);
+    return NextResponse.json(createJsonRpcError(null, -32700, 'Parse error'), { status: 400 });
+  }
+}
+
+export async function GET(request: NextRequest) {
+  // Return server info for GET requests
+  return NextResponse.json({
+    name: SERVER_INFO.name,
+    version: SERVER_INFO.version,
+    status: 'active',
+    tools: TOOLS.map(t => ({ name: t.name, description: t.description })),
+  });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
+    },
+  });
+}
