@@ -8,13 +8,21 @@ export async function POST(request: NextRequest) {
 
     console.log('MCP Request:', {
       method: body.method,
+      id: body.id,
       hasAuth: !!authHeader,
       params: body.params ? Object.keys(body.params) : [],
     });
 
     const response = await mcpServer.handleRequest(body, authHeader);
 
-    return NextResponse.json(response, {
+    // Return JSON-RPC 2.0 format if request included jsonrpc field
+    const jsonRpcResponse = body.jsonrpc ? {
+      jsonrpc: '2.0',
+      id: body.id || null,
+      ...response,
+    } : response;
+
+    return NextResponse.json(jsonRpcResponse, {
       headers: {
         'Content-Type': 'application/json',
       },
@@ -23,6 +31,8 @@ export async function POST(request: NextRequest) {
     console.error('MCP endpoint error:', error);
     return NextResponse.json(
       {
+        jsonrpc: '2.0',
+        id: null,
         error: {
           code: -32700,
           message: 'Parse error or invalid request format',
