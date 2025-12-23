@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Handle root URL - redirect MCP requests to /mcp
+// Handle root URL - rewrite MCP requests to /mcp
 export async function GET(request: NextRequest) {
   const accept = request.headers.get('accept') || '';
 
-  // If it's an MCP client (expecting SSE or JSON), redirect to /mcp
+  // If it's an MCP client (expecting SSE or JSON), rewrite to /mcp
   if (accept.includes('text/event-stream') || accept.includes('application/json')) {
-    return NextResponse.redirect(new URL('/mcp', request.url), 307);
+    return NextResponse.rewrite(new URL('/mcp', request.url));
   }
 
   // Browser visitors - redirect to home page
@@ -14,8 +14,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  // Redirect POST requests to /mcp
-  return NextResponse.redirect(new URL('/mcp', request.url), 307);
+  // Rewrite POST requests to /mcp (internal forward, not redirect)
+  return NextResponse.rewrite(new URL('/mcp', request.url));
 }
 
 export async function OPTIONS() {
