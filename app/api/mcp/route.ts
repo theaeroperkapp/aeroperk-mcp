@@ -1,66 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mcpServer } from '@/lib/mcp';
 
+// Legacy endpoint - redirect to new MCP endpoint
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const authHeader = request.headers.get('authorization');
-
-    console.log('MCP Request:', {
-      method: body.method,
-      id: body.id,
-      hasAuth: !!authHeader,
-      params: body.params ? Object.keys(body.params) : [],
-    });
-
-    const response = await mcpServer.handleRequest(body, authHeader);
-
-    // Return JSON-RPC 2.0 format if request included jsonrpc field
-    const jsonRpcResponse = body.jsonrpc ? {
-      jsonrpc: '2.0',
-      id: body.id || null,
-      ...response,
-    } : response;
-
-    return NextResponse.json(jsonRpcResponse, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-  } catch (error: any) {
-    console.error('MCP endpoint error:', error);
-    return NextResponse.json(
-      {
-        jsonrpc: '2.0',
-        id: null,
-        error: {
-          code: -32700,
-          message: 'Parse error or invalid request format',
-        },
-      },
-      { status: 400 }
-    );
-  }
+  // Forward to new /mcp endpoint
+  const url = new URL('/mcp', request.url);
+  return NextResponse.redirect(url, { status: 307 });
 }
 
 export async function GET() {
-  const tools = mcpServer.getToolsList();
-
   return NextResponse.json({
     name: 'AeroPerk MCP Server',
     version: '1.0.0',
     description: 'Peer-to-peer package delivery via traveling drivers',
     status: 'active',
     documentation: 'https://aeroperk.com/docs',
-    tools: tools,
     endpoints: {
-      mcp: '/api/mcp',
+      mcp: '/mcp',
+      mcpLegacy: '/api/mcp',
       privacyPolicy: '/privacy-policy',
     },
+    tools: [
+      { name: 'create_delivery_request', description: 'Create a new package delivery request' },
+      { name: 'search_driver_routes', description: 'Search for drivers on a route' },
+      { name: 'assign_driver', description: 'Assign yourself as a driver to a request' },
+    ],
     backend: {
       url: process.env.AEROPERK_API_URL || 'https://api.aeroperk.com/api',
       status: 'connected',
     },
+    note: 'ChatGPT users: Use /mcp endpoint (Streamable HTTP)',
   });
 }
 
